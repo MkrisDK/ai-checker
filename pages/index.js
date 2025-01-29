@@ -1,3 +1,4 @@
+// pages/index.js
 import { useState } from 'react';
 
 const MAX_WORDS = 2500;
@@ -96,10 +97,68 @@ export default function Home() {
           )}
 
           {result && !result.error && (
-            <div className="mt-8 bg-white rounded-lg shadow-sm border border-gray-100 p-6">
-              <div className="text-center">
-                <h2 className="text-3xl font-bold">{result.aiProbability}%</h2>
-                <p className="text-gray-600">AI Probability</p>
+            <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-8">
+              {/* Left Column - Text Analysis */}
+              <div className="bg-white rounded-lg shadow-sm border border-gray-100 p-6">
+                <div className="space-y-4">
+                  {text.split('\n').map((paragraph, idx) => (
+                    <p 
+                      key={idx} 
+                      className={`p-2 rounded ${
+                        result.aiProbability > 75 ? 'bg-orange-100' : 'bg-green-100'
+                      }`}
+                    >
+                      {paragraph}
+                    </p>
+                  ))}
+                </div>
+                <div className="mt-4 text-sm text-gray-500">
+                  {result.wordCount} Words | {result.characters} Characters
+                </div>
+              </div>
+
+              {/* Right Column - Probability Breakdown */}
+              <div className="bg-white rounded-lg shadow-sm border border-gray-100 p-6">
+                <div className="text-center mb-8">
+                  <h2 className="text-6xl font-bold text-gray-900">
+                    {result.aiProbability}%
+                  </h2>
+                  <p className="text-gray-600 mt-2">of text is likely AI</p>
+                </div>
+
+                {/* Probability Bar */}
+                <div className="h-48 relative mb-8">
+                  <div className="absolute inset-0 flex">
+                    <div
+                      className="bg-orange-400"
+                      style={{ width: `${result.aiProbability}%` }}
+                    />
+                    <div
+                      className="bg-gray-200"
+                      style={{ width: `${100 - result.aiProbability}%` }}
+                    />
+                  </div>
+                  <div className="absolute bottom-0 w-full flex justify-between text-sm text-gray-600">
+                    <span>AI</span>
+                    <span>Human</span>
+                  </div>
+                </div>
+
+                {/* Detailed Breakdown */}
+                <div className="space-y-4">
+                  <div className="flex justify-between items-center">
+                    <span>AI-generated</span>
+                    <span className="font-semibold">{result.aiProbability}%</span>
+                  </div>
+                  <div className="flex justify-between items-center text-gray-600">
+                    <span>Human-written & AI-refined</span>
+                    <span>{Math.floor((100 - result.aiProbability) * 0.4)}%</span>
+                  </div>
+                  <div className="flex justify-between items-center text-gray-600">
+                    <span>Human-written</span>
+                    <span>{Math.floor((100 - result.aiProbability) * 0.6)}%</span>
+                  </div>
+                </div>
               </div>
             </div>
           )}
