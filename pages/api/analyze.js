@@ -5,13 +5,7 @@ const anthropic = new Anthropic({
 });
 
 export default async function handler(req, res) {
-  // Log request details
-  console.log('=== API Request Received ===');
-  console.log('Method:', req.method);
-
-  // Only allow POST requests
   if (req.method !== 'POST') {
-    console.log('Method not allowed:', req.method);
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
@@ -22,40 +16,41 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'No text provided' });
     }
 
-    console.log('Calling Claude API...');
+    // Optimer promptet for hurtigere analyse
     const response = await anthropic.messages.create({
       model: "claude-3-sonnet-20240229",
       max_tokens: 1000,
-      temperature: 0.3,
+      temperature: 0.1, // Lavere temperatur for mere konsistente svar
       messages: [{
         role: "user",
-        content: `Analyze this text and determine if it was written by AI or a human. Respond with ONLY a JSON object in this exact format (no other text):
+        content: `You are a precise AI text detector. Analyze this text and respond ONLY with a JSON object containing:
+        - Overall AI probability (0-100)
+        - Word count and character count
+        - Text segments marked as AI or human with high confidence areas highlighted
+        
+        Format the response exactly like this, with no additional text:
         {
-          "aiProbability": <number between 0-100>,
-          "detectedLanguage": "<language name>",
-          "confidence": "<Low|Medium|High>",
+          "aiProbability": <0-100>,
+          "wordCount": <number>,
+          "characters": <number>,
           "segments": [
             {
-              "text": "<segment text>",
-              "aiProbability": <number between 0-100>,
-              "explanation": "<why this segment appears AI/human generated>"
+              "text": "<segment>",
+              "isAI": <true/false>,
+              "confidence": "High|Medium|Low"
             }
-          ],
-          "reasonings": ["<reason 1>", "<reason 2>", "<reason 3>"]
+          ]
         }
-        
-        Text to analyze: ${text}`
+
+        Text: ${text}`
       }]
     });
 
-    console.log('Received response from Claude');
+    // Parse og valider resultatet
+    const analysis = JSON.parse(response.content[0].text.trim());
     
-    let analysis;
-    try {
-      analysis = JSON.parse(response.content[0].text.trim());
-    } catch (error) {
-      console.error('Failed to parse Claude response:', error);
-      return res.status(500).json({ error: 'Failed to parse analysis results' });
+    if (!analysis || typeof analysis.aiProbability !== 'number') {
+      throw new Error('Invalid analysis format received');
     }
 
     return res.status(200).json(analysis);
