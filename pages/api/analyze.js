@@ -4,89 +4,97 @@ const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
 });
 
-function analyzeGenerationPatterns(text) {
-  // Grundlæggende tekstanalyse
+function detectAIPatterns(text) {
+  let aiScore = 100; // Start med antagelsen om at det er AI
+  const patterns = {};
+
+  // Split tekst i komponenter
   const paragraphs = text.split('\n').filter(p => p.trim());
   const sentences = text.split(/[.!?]+/).filter(s => s.trim());
-  
-  let aiScore = 0;
-  let patterns = {};
+  const words = text.split(/\s+/);
 
-  // 1. Konsistens i afsnit
+  // 1. Struktur og formattering
   const paragraphLengths = paragraphs.map(p => p.length);
-  const avgParagraphLength = paragraphLengths.reduce((a,b) => a + b) / paragraphLengths.length;
-  const paragraphVariance = paragraphLengths.map(l => Math.abs(l - avgParagraphLength));
-  const isParagraphLengthConsistent = Math.max(...paragraphVariance) < avgParagraphLength * 0.3;
+  const variance = calculateVariance(paragraphLengths);
+  patterns.structureVariance = variance;
   
-  patterns.paragraphConsistency = isParagraphLengthConsistent;
-  if (isParagraphLengthConsistent) aiScore += 20;
-
-  // 2. Sætningsstruktur
-  const sentenceLengths = sentences.map(s => s.trim().split(' ').length);
-  const avgSentenceLength = sentenceLengths.reduce((a,b) => a + b) / sentenceLengths.length;
-  const sentenceVariance = sentenceLengths.map(l => Math.abs(l - avgSentenceLength));
-  const isSentenceLengthConsistent = Math.max(...sentenceVariance) < 5;
-  
-  patterns.sentenceConsistency = isSentenceLengthConsistent;
-  if (isSentenceLengthConsistent) aiScore += 20;
-
-  // 3. Flow og progression
-  let flowScore = 0;
-  for (let i = 1; i < sentences.length; i++) {
-    const current = sentences[i];
-    const previous = sentences[i-1];
-    
-    const currentWords = new Set(current.toLowerCase().split(' '));
-    const previousWords = new Set(previous.toLowerCase().split(' '));
-    const overlap = [...currentWords].filter(word => previousWords.has(word)).length;
-    
-    if (overlap > 2) flowScore++;
+  if (variance > 50) {
+    aiScore -= 20; // Uregelmæssig struktur er menneskeligt
+    patterns.hasIrregularStructure = true;
   }
-  
-  const hasLogicalFlow = flowScore / sentences.length > 0.3;
-  patterns.logicalFlow = hasLogicalFlow;
-  if (hasLogicalFlow) aiScore += 20;
 
-  // 4. Strukturmønstre i afsnit
-  let structureScore = 0;
-  paragraphs.forEach(p => {
-    const paragraphSentences = p.split(/[.!?]+/).filter(s => s.trim());
-    if (paragraphSentences.length >= 2) {
-      // Tjek for intro-konklusion mønster
-      if (paragraphSentences[0].length < paragraphSentences[1].length && 
-          paragraphSentences[paragraphSentences.length-1].length < paragraphSentences[paragraphSentences.length-2].length) {
-        structureScore++;
+  // 2. Sætningsmønstre
+  let patternBreaks = 0;
+  sentences.forEach((sentence, i) => {
+    if (i > 0) {
+      // Sammenlign start og slut af sætninger
+      const currentStart = sentence.trim().split(' ')[0].toLowerCase();
+      const previousStart = sentences[i-1].trim().split(' ')[0].toLowerCase();
+      
+      if (currentStart !== previousStart) {
+        patternBreaks++;
       }
     }
   });
   
-  const hasConsistentStructure = structureScore / paragraphs.length > 0.5;
-  patterns.consistentStructure = hasConsistentStructure;
-  if (hasConsistentStructure) aiScore += 20;
+  patterns.patternBreaks = patternBreaks;
+  aiScore -= patternBreaks * 3; // Flere brud = mere menneskeligt
 
-  // 5. Variation i ordvalg
-  const words = text.toLowerCase().split(/\s+/);
-  const uniqueWords = new Set(words).size;
-  const repetitionRatio = uniqueWords / words.length;
-  const hasHighWordVariation = repetitionRatio > 0.7;
+  // 3. Afstande og formattering
+  let formattingBreaks = 0;
+  paragraphs.forEach((p, i) => {
+    if (i > 0) {
+      const lengthRatio = p.length / paragraphs[i-1].length;
+      if (lengthRatio < 0.5 || lengthRatio > 2) {
+        formattingBreaks++;
+      }
+    }
+  });
   
-  patterns.highWordVariation = hasHighWordVariation;
-  if (hasHighWordVariation) aiScore += 20;
+  patterns.formattingBreaks = formattingBreaks;
+  aiScore -= formattingBreaks * 5;
 
-  // Normalisér den endelige score
-  aiScore = Math.min(100, Math.max(0, aiScore));
+  // 4. Sætningslængde variation
+  const sentenceLengths = sentences.map(s => s.trim().split(/\s+/).length);
+  const sentenceVariance = calculateVariance(sentenceLengths);
+  patterns.sentenceVariance = sentenceVariance;
+  
+  if (sentenceVariance > 10) {
+    aiScore -= 15; // Store variationer i sætningslængde er menneskeligt
+  }
+
+  // 5. Konsistent tegnsætning
+  const punctuationPattern = sentences.map(s => 
+    (s.match(/[,;:]/) || []).length
+  );
+  const punctuationVariance = calculateVariance(punctuationPattern);
+  patterns.punctuationVariance = punctuationVariance;
+  
+  if (punctuationVariance > 2) {
+    aiScore -= 15; // Inkonsistent tegnsætning er menneskeligt
+  }
+
+  // Normalisér scoren
+  aiScore = Math.max(0, Math.min(100, aiScore));
 
   return {
     aiScore,
     patterns,
     metrics: {
-      paragraphConsistency: isParagraphLengthConsistent ? "High" : "Low",
-      sentenceConsistency: isSentenceLengthConsistent ? "High" : "Low",
-      flowCoherence: hasLogicalFlow ? "High" : "Low",
-      structureConsistency: hasConsistentStructure ? "High" : "Low",
-      vocabularyVariation: hasHighWordVariation ? "High" : "Low"
+      structureVariance: variance,
+      patternBreaks,
+      formattingBreaks,
+      sentenceVariance,
+      punctuationVariance
     }
   };
+}
+
+function calculateVariance(numbers) {
+  const avg = numbers.reduce((a, b) => a + b) / numbers.length;
+  return Math.sqrt(
+    numbers.reduce((a, b) => a + Math.pow(b - avg, 2), 0) / numbers.length
+  );
 }
 
 export default async function handler(req, res) {
@@ -101,29 +109,39 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'No text provided' });
     }
 
-    // Analysér mønstre
-    const analysis = analyzeGenerationPatterns(text);
+    // Hovedanalyse
+    const analysis = detectAIPatterns(text);
     
-    // Del teksten op i segmenter baseret på mønstre
+    // Segment analyse
     const segments = text.split(/[.!?]+/)
       .filter(s => s.trim())
       .map(segment => {
-        const segmentAnalysis = analyzeGenerationPatterns(segment);
+        const segmentAnalysis = detectAIPatterns(segment);
         return {
           text: segment.trim(),
-          isAI: segmentAnalysis.aiScore > 50,
-          confidence: segmentAnalysis.aiScore > 75 ? "High" : 
-                     segmentAnalysis.aiScore > 50 ? "Medium" : "Low"
+          isAI: segmentAnalysis.aiScore > 70, // Højere tærskel for segmenter
+          confidence: 
+            segmentAnalysis.aiScore > 85 ? "High" :
+            segmentAnalysis.aiScore > 70 ? "Medium" : "Low"
         };
       });
+
+    // Beregn human-written og AI-refined procenter
+    const humanWritten = 100 - analysis.aiScore;
+    const aiRefined = Math.round(humanWritten * 0.4); // 40% af den menneskelige del
+    const pureHuman = humanWritten - aiRefined;
 
     return res.status(200).json({
       aiProbability: analysis.aiScore,
       wordCount: text.split(/\s+/).length,
       characters: text.length,
       segments,
-      metrics: analysis.metrics,
-      patterns: analysis.patterns
+      metrics: {
+        ...analysis.metrics,
+        aiGenerated: analysis.aiScore,
+        humanWrittenAndAiRefined: aiRefined,
+        humanWritten: pureHuman
+      }
     });
     
   } catch (error) {
