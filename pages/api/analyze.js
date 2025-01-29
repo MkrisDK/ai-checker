@@ -4,7 +4,6 @@ const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
 });
 
-// Helper funktion til at sanitize tekst for JSON
 function sanitizeText(text) {
   return text
     .replace(/[\n\r]/g, ' ')
@@ -30,18 +29,36 @@ export default async function handler(req, res) {
       temperature: 0.1,
       messages: [{
         role: "user",
-        content: `You are a precise AI text detector. Return a JSON response in this exact format: {"aiProbability": number, "wordCount": number, "characters": number, "segments": [{"text": "string", "isAI": boolean, "confidence": "High|Medium|Low"}]}. Analyze this text and return ONLY valid JSON with no additional text or formatting. Text to analyze: ${sanitizeText(text)}`
+        content: `You are an expert at detecting AI-generated text. Analyze the following text for signs of AI authorship.
+
+Key indicators of AI-generated text include:
+- Consistent writing style throughout without natural variations
+- Overly formal or structured language
+- Perfect grammar and punctuation
+- Repetitive phrases or patterns
+- Lack of unique personal experiences or perspectives
+- Generic or templated responses
+- Overly detailed explanations
+- Systematic and methodical approaches to topics
+
+Analyze the text carefully considering these factors and return a JSON response with:
+- aiProbability: A number between 0-100 indicating likelihood of AI authorship
+- wordCount: Total number of words
+- characters: Total number of characters
+- segments: Array of text segments with their analysis
+
+Format exactly as: {"aiProbability": number, "wordCount": number, "characters": number, "segments": [{"text": "string", "isAI": boolean, "confidence": "High|Medium|Low"}]}
+
+Provide ONLY the JSON response, no other text.
+
+Text to analyze: ${sanitizeText(text)}`
       }]
     });
-
-    // Log raw response for debugging
-    console.log('Raw response:', response.content[0].text);
 
     try {
       const cleaned = response.content[0].text.trim();
       const analysis = JSON.parse(cleaned);
       
-      // Validate required fields
       if (typeof analysis.aiProbability !== 'number' || !Array.isArray(analysis.segments)) {
         throw new Error('Invalid response format');
       }
