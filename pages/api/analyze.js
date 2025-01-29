@@ -4,156 +4,95 @@ const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
 });
 
-function analyzeSentence(sentence) {
+function analyzeGenerationPatterns(text) {
+  // Del teksten op i forskellige niveauer
+  const chunks = text.split(/[.!?]+/).filter(c => c.trim());
+  const paragraphs = text.split('\n\n').filter(p => p.trim());
+  const sentences = text.split(/[.!?]+/).filter(s => s.trim());
+  
   let aiScore = 0;
   
-  // 1. Sætningsstruktur
-  const words = sentence.trim().split(' ');
+  // 1. Chunk/Token Analyse
+  let chunkConsistencyScore = 0;
+  const chunkLengths = chunks.map(chunk => chunk.trim().split(' ').length);
   
-  // Tjek for komplet sætningsstruktur (subjekt + verbum)
-  const hasCompleteStructure = 
-    words.length > 3 && 
-    words[0].charAt(0) === words[0].charAt(0).toUpperCase() &&
-    (sentence.endsWith('.') || sentence.endsWith('?') || sentence.endsWith('!'));
-    
-  if (hasCompleteStructure) aiScore += 30;
-
-  // 2. Kommatering
-  const commas = sentence.match(/,/g) || [];
-  const expectedCommas = sentence.length / 40;
-  if (Math.abs(commas.length - expectedCommas) < 1) {
-    aiScore += 20;
-  }
-
-  // 3. Forklarende detaljer
-  const hasExplanation = 
-    sentence.includes(' for at ') ||
-    sentence.includes(' hvilket ') ||
-    sentence.includes(' eftersom ') ||
-    sentence.includes(' således ');
-    
-  if (hasExplanation) aiScore += 25;
-
-  // 4. Formelt sprog
-  const formalWords = [
-    'analysere', 'implementere', 'vurdere', 'konkludere',
-    'følgelig', 'dermed', 'hermed', 'hvorved'
-  ];
-  
-  const hasFormalLanguage = formalWords.some(word => 
-    sentence.toLowerCase().includes(word)
-  );
-  
-  if (hasFormalLanguage) aiScore += 25;
-
-  return Math.min(100, aiScore);
-}
-
-function detectAIPatterns(text) {
-  let aiScore = 100;
-  
-  // Split teksten
-  const lines = text.split('\n');
-  const cleanLines = lines.filter(l => l.trim());
-  
-  // 1. Liste-detektion
-  const listPatterns = [
-    /^[0-9]+\./,  // Nummererede lister
-    /^[-•*]/,     // Bullet points
-    /^[A-Z][a-z]+ [0-9]+:/, // Format som "Step 1:"
-  ];
-  
-  let listCount = 0;
-  cleanLines.forEach(line => {
-    if (listPatterns.some(pattern => pattern.test(line.trim()))) {
-      listCount++;
-    }
-  });
-  
-  const listRatio = listCount / cleanLines.length;
-  if (listRatio > 0.3) aiScore += 20;
-  
-  // 2. Tomme linjer mellem punkter
-  let emptyLinePattern = 0;
-  for (let i = 1; i < lines.length - 1; i++) {
-    if (!lines[i].trim() && 
-        lines[i-1].trim() && 
-        lines[i+1].trim()) {
-      emptyLinePattern++;
+  for (let i = 1; i < chunkLengths.length; i++) {
+    const lengthDiff = Math.abs(chunkLengths[i] - chunkLengths[i-1]);
+    if (lengthDiff < 3) {
+      chunkConsistencyScore += 1;
     }
   }
   
-  if (emptyLinePattern > 2) aiScore += 15;
-  
-  // 3. Tjek for indledende sætninger før lister
-  const hasIntroBeforeList = cleanLines.some((line, i) => {
-    const nextLine = cleanLines[i + 1];
-    return line.endsWith(':') && 
-           nextLine && 
-           listPatterns.some(pattern => pattern.test(nextLine.trim()));
-  });
-  
-  if (hasIntroBeforeList) aiScore += 15;
-  
-  // 4. Spørgsmål i slutningen
-  const lastLines = cleanLines.slice(-2);
-  const hasQuestionAtEnd = lastLines.some(line => 
-    line.trim().endsWith('?')
-  );
-  
-  if (hasQuestionAtEnd) aiScore += 10;
-  
-  // 5. Systematisk afsnitsopbygning
-  const paragraphs = text.split('\n\n').filter(p => p.trim());
-  const hasConsistentParagraphs = paragraphs.every(p => 
-    p.split('.').length >= 2 && 
-    p.split('.').length <= 4
-  );
-  
-  if (hasConsistentParagraphs) aiScore += 20;
-  
-  return Math.min(100, aiScore);
-}
+  const chunkConsistencyRatio = chunkConsistencyScore / (chunks.length - 1);
+  aiScore += chunkConsistencyRatio * 30; // Max 30 points for chunk consistency
 
-function analyzeText(text) {
-  // 1. Strukturel analyse
-  const structuralScore = detectAIPatterns(text);
+  // 2. Informationsflow Analyse
+  let flowConsistencyScore = 0;
   
-  // 2. Sætningsbaseret analyse
-  const sentences = text.split(/[.!?]+/).filter(s => s.trim());
-  const sentenceScores = sentences.map(analyzeSentence);
-  const averageSentenceScore = sentenceScores.reduce((a, b) => a + b, 0) / sentences.length;
+  for (let i = 1; i < paragraphs.length; i++) {
+    const prevWords = new Set(paragraphs[i-1].toLowerCase().split(/\W+/));
+    const currentWords = new Set(paragraphs[i].toLowerCase().split(/\W+/));
+    
+    // Find overlap i nøgleord mellem afsnit
+    const overlap = [...currentWords].filter(word => 
+      word.length > 3 && prevWords.has(word)
+    ).length;
+    
+    if (overlap >= 3) {
+      flowConsistencyScore += 1;
+    }
+  }
   
-  // 3. Kombiner scores med vægtning
-  const combinedScore = Math.round(
-    (structuralScore * 0.6) +
-    (averageSentenceScore * 0.4)
-  );
+  const flowConsistencyRatio = flowConsistencyScore / (paragraphs.length - 1 || 1);
+  aiScore += flowConsistencyRatio * 30; // Max 30 points for flow consistency
 
-  // Identificer segmenter
-  const segments = sentences.map((sentence, index) => ({
-    text: sentence.trim(),
-    isAI: sentenceScores[index] > 70,
-    confidence: sentenceScores[index] > 85 ? "High" : 
-                sentenceScores[index] > 70 ? "Medium" : "Low"
-  }));
-
-  // Beregn fordelinger
-  const humanWritten = 100 - combinedScore;
-  const aiRefined = Math.round(humanWritten * 0.4);
-  const pureHuman = humanWritten - aiRefined;
+  // 3. Sætningskonstruktion Analyse
+  let constructionConsistencyScore = 0;
+  
+  for (let i = 1; i < sentences.length; i++) {
+    const currentPattern = getConstructionPattern(sentences[i]);
+    const prevPattern = getConstructionPattern(sentences[i-1]);
+    
+    if (patternsAreSimilar(currentPattern, prevPattern)) {
+      constructionConsistencyScore += 1;
+    }
+  }
+  
+  const constructionRatio = constructionConsistencyScore / (sentences.length - 1);
+  aiScore += constructionRatio * 40; // Max 40 points for construction consistency
 
   return {
-    aiProbability: combinedScore,
-    segments,
+    aiScore: Math.min(100, Math.round(aiScore)),
     metrics: {
-      structuralScore,
-      averageSentenceScore,
-      aiGenerated: combinedScore,
-      humanWrittenAndAiRefined: aiRefined,
-      humanWritten: pureHuman
+      chunkConsistency: Math.round(chunkConsistencyRatio * 100),
+      flowConsistency: Math.round(flowConsistencyRatio * 100),
+      constructionConsistency: Math.round(constructionRatio * 100)
     }
   };
+}
+
+// Hjælpefunktioner for sætningsanalyse
+function getConstructionPattern(sentence) {
+  const words = sentence.trim().split(/\s+/);
+  return {
+    length: words.length,
+    firstWordType: getWordType(words[0]),
+    lastWordType: getWordType(words[words.length - 1]),
+    commaCount: (sentence.match(/,/g) || []).length
+  };
+}
+
+function getWordType(word) {
+  if (!word) return 'unknown';
+  if (word.match(/^[A-Z]/)) return 'capitalize';
+  if (word.match(/^[a-z]/)) return 'lowercase';
+  return 'other';
+}
+
+function patternsAreSimilar(pattern1, pattern2) {
+  return Math.abs(pattern1.length - pattern2.length) < 3 &&
+         pattern1.firstWordType === pattern2.firstWordType &&
+         Math.abs(pattern1.commaCount - pattern2.commaCount) < 2;
 }
 
 export default async function handler(req, res) {
@@ -168,14 +107,38 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'No text provided' });
     }
 
-    const analysis = analyzeText(text);
+    const analysis = analyzeGenerationPatterns(text);
     
+    // Identificer segmenter baseret på konsistens
+    const segments = text.split(/[.!?]+/)
+      .filter(s => s.trim())
+      .map(segment => {
+        const segmentAnalysis = analyzeGenerationPatterns(segment);
+        return {
+          text: segment.trim(),
+          isAI: segmentAnalysis.aiScore > 70,
+          confidence: 
+            segmentAnalysis.aiScore > 85 ? "High" :
+            segmentAnalysis.aiScore > 70 ? "Medium" : "Low"
+        };
+      });
+
+    // Beregn menneske/AI fordeling
+    const humanScore = 100 - analysis.aiScore;
+    const aiRefined = Math.round(humanScore * 0.4);
+    const pureHuman = humanScore - aiRefined;
+
     return res.status(200).json({
-      aiProbability: analysis.aiProbability,
+      aiProbability: analysis.aiScore,
       wordCount: text.split(/\s+/).length,
       characters: text.length,
-      segments: analysis.segments,
-      metrics: analysis.metrics
+      segments,
+      metrics: {
+        ...analysis.metrics,
+        aiGenerated: analysis.aiScore,
+        humanWrittenAndAiRefined: aiRefined,
+        humanWritten: pureHuman
+      }
     });
     
   } catch (error) {
