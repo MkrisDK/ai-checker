@@ -4,57 +4,53 @@ const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
 });
 
-// Beregn perplexity score
-function calculatePerplexity(text) {
-  const words = text.toLowerCase().split(/\s+/);
-  let transitions = new Map();
-  let wordCounts = new Map();
+// Analyser sprogmønstre
+function analyzeLanguagePatterns(text) {
+  // Split tekst i sætninger
+  const sentences = text.split(/[.!?]+/).filter(s => s.trim().length > 0);
   
-  // Tæl ordovergange
-  for (let i = 0; i < words.length - 1; i++) {
-    const current = words[i];
-    const next = words[i + 1];
-    const key = `${current}|${next}`;
-    
-    transitions.set(key, (transitions.get(key) || 0) + 1);
-    wordCounts.set(current, (wordCounts.get(current) || 0) + 1);
-  }
+  // Beregn gennemsnitlig sætningslængde og variation
+  const lengths = sentences.map(s => s.split(' ').length);
+  const avgLength = lengths.reduce((a, b) => a + b, 0) / lengths.length;
+  const variance = lengths.reduce((a, b) => a + Math.pow(b - avgLength, 2), 0) / lengths.length;
   
-  // Beregn perplexity
-  let logProb = 0;
-  for (let i = 0; i < words.length - 1; i++) {
-    const current = words[i];
-    const next = words[i + 1];
-    const key = `${current}|${next}`;
-    
-    const transitionCount = transitions.get(key) || 0;
-    const wordCount = wordCounts.get(current) || 0;
-    
-    const probability = transitionCount / wordCount;
-    logProb += Math.log2(probability || 1e-10);
-  }
+  // Store variationer er typisk menneskelige
+  const lengthScore = Math.min(variance / 10, 1); // Normaliseret 0-1
   
-  return Math.pow(2, -logProb / (words.length - 1));
+  return {
+    variationScore: lengthScore,
+    avgSentenceLength: avgLength
+  };
 }
 
-// Beregn entropy
-function calculateEntropy(text) {
-  const charFreq = new Map();
-  const length = text.length;
+// Analyser personlige markører
+function analyzePersonalMarkers(text) {
+  const personalMarkers = [
+    'jeg', 'vi', 'vores', 'min', 'mit', 'mine',
+    'faktisk', 'ærligt', 'måske', 'nok', 'vel',
+    ':)', ':(', ';)', '...', '!'
+  ];
   
-  // Tæl tegn
-  for (const char of text) {
-    charFreq.set(char, (charFreq.get(char) || 0) + 1);
-  }
+  const words = text.toLowerCase().split(/\s+/);
+  const markerCount = personalMarkers.reduce((count, marker) => 
+    count + words.filter(w => w.includes(marker)).length, 0);
   
-  // Beregn entropy
-  let entropy = 0;
-  for (const count of charFreq.values()) {
-    const probability = count / length;
-    entropy -= probability * Math.log2(probability);
-  }
+  return markerCount / words.length; // Normaliseret ratio
+}
+
+// Analyser forretningssprog
+function analyzeBusinessLanguage(text) {
+  const businessTerms = [
+    'seo', 'optimeret', 'løsning', 'platform', 'leads', 
+    'kommerci', 'implementer', 'analyse', 'data',
+    'marked', 'strategi', 'udvikling', 'process'
+  ];
   
-  return entropy;
+  const words = text.toLowerCase().split(/\s+/);
+  const termCount = businessTerms.reduce((count, term) => 
+    count + words.filter(w => w.includes(term)).length, 0);
+  
+  return termCount / words.length;
 }
 
 export default async function handler(req, res) {
@@ -69,70 +65,71 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'No text provided' });
     }
 
-    // Beregn statistiske målinger
-    const perplexity = calculatePerplexity(text);
-    const entropy = calculateEntropy(text);
-    
-    // Typiske værdier baseret på analyse af menneskeligt vs. AI-genereret tekst
-    const humanPerplexityRange = { min: 50, max: 150 };
-    const humanEntropyRange = { min: 4, max: 5 };
-    
-    // Beregn baseline sandsynlighed baseret på statistiske målinger
-    const perplexityScore = Math.min(100, Math.max(0, 
-      100 * (1 - (perplexity - humanPerplexityRange.min) / (humanPerplexityRange.max - humanPerplexityRange.min))
-    ));
-    
-    const entropyScore = Math.min(100, Math.max(0,
-      100 * (1 - (entropy - humanEntropyRange.min) / (humanEntropyRange.max - humanEntropyRange.min))
-    ));
+    // Udfør detaljerede analyser
+    const patterns = analyzeLanguagePatterns(text);
+    const personalScore = analyzePersonalMarkers(text);
+    const businessScore = analyzeBusinessLanguage(text);
 
-    // Spørg Claude for en kvalitativ vurdering
+    // Vægtning af forskellige faktorer
+    const naturalness = patterns.variationScore * 0.4 + personalScore * 0.6;
+    const contextScore = businessScore * 0.5 + (patterns.avgSentenceLength < 20 ? 0.5 : 0);
+
+    // Bed Claude om en mere fokuseret analyse
     const response = await anthropic.messages.create({
       model: "claude-3-sonnet-20240229",
       max_tokens: 1000,
       temperature: 0.1,
       messages: [{
         role: "user",
-        content: `Analyze this text for AI authorship markers. Consider:
-        - Language complexity and variation
-        - Personal elements and context
-        - Structural patterns
-        - Natural inconsistencies
+        content: `Du er en ekspert i at analysere dansk forretningskommunikation. 
+        Vurder denne tekst for tegn på AI-generering. 
+        Se specifikt efter:
+        - Naturlig dansk sætningsstruktur
+        - Forretningsspecifikt sprog
+        - Kontekstrelevante detaljer
+        - Personlig tone
+        - Naturlige skrivemarkører (smileys, udråbstegn, etc.)
         
-        Return only a number between 0-100 representing AI probability, where 100 means definitely AI.
+        Returner KUN et tal mellem 0-100 der indikerer sandsynligheden for AI-generering.
         
-        Text: ${text}`
+        Tekst: ${text}`
       }]
     });
 
-    // Parse Claude's vurdering
     const claudeScore = parseInt(response.content[0].text.trim());
-    
+
     // Kombiner scores med vægtning
-    const combinedScore = Math.round(
-      (perplexityScore * 0.3) + 
-      (entropyScore * 0.3) + 
-      (claudeScore * 0.4)
+    const aiProbability = Math.round(
+      (naturalness * 0.4 + 
+      contextScore * 0.3 + 
+      (claudeScore/100) * 0.3) * 100
     );
 
-    // Identificer segmenter med høj AI-sandsynlighed
-    const segments = text.split(/[.!?]+/).map(segment => ({
-      text: segment.trim(),
-      isAI: calculatePerplexity(segment) < humanPerplexityRange.min,
-      confidence: "High"
-    })).filter(segment => segment.text.length > 0);
+    // Identificer og marker segmenter
+    const segments = text.split(/[.!?]+/)
+      .filter(s => s.trim().length > 0)
+      .map(segment => {
+        const segmentPersonalScore = analyzePersonalMarkers(segment);
+        const segmentPatterns = analyzeLanguagePatterns(segment);
+        
+        return {
+          text: segment.trim(),
+          isAI: segmentPersonalScore < 0.1 && segmentPatterns.variationScore < 0.3,
+          confidence: segmentPersonalScore < 0.05 ? "High" : "Medium"
+        };
+      });
 
     return res.status(200).json({
-      aiProbability: combinedScore,
+      aiProbability,
       wordCount: text.split(/\s+/).length,
       characters: text.length,
       segments,
       metrics: {
-        perplexity,
-        entropy,
-        perplexityScore,
-        entropyScore,
-        claudeScore
+        naturalness: Math.round(naturalness * 100),
+        contextRelevance: Math.round(contextScore * 100),
+        claudeScore,
+        personalMarkers: Math.round(personalScore * 100),
+        businessContext: Math.round(businessScore * 100)
       }
     });
     
